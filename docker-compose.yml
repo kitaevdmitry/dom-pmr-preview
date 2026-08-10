@@ -1,0 +1,36 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://dinastiya:${POSTGRES_PASSWORD}@database:5432/dinastiya
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET}
+      ADMIN_NAME: ${ADMIN_NAME:-Администратор}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@dinastiya.local}
+      SITE_URL: ${SITE_URL:-http://localhost:8080}
+      UPLOAD_DIR: /data/uploads
+    ports:
+      - "8080:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dinastiya
+      POSTGRES_USER: dinastiya
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dinastiya -d dinastiya"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
