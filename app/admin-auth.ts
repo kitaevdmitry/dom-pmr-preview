@@ -1,60 +1,15 @@
-import { createHmac, createHash, timingSafeEqual } from "node:crypto";
-import { cookies } from "next/headers";
+import { createClient } from "../lib/supabase/server";
 
-export const ADMIN_COOKIE = "dinastiya_admin";
-const SESSION_SECONDS = 60 * 60 * 12;
+const ADMIN_EMAILS = new Set(["polupoker@gmail.com","troshinskayaa@gmail.com"]);
 
-function secret() {
-  const value = process.env.ADMIN_SESSION_SECRET;
-  if (!value || value.length < 32) throw new Error("ADMIN_SESSION_SECRET must contain at least 32 characters");
-  return value;
-}
-
-function sign(payload: string) {
-  return createHmac("sha256", secret()).update(payload).digest("base64url");
-}
-
-export function verifyAdminPassword(value: string) {
-  const expected = process.env.ADMIN_PASSWORD;
-  if (!expected || expected.length < 10) return false;
-  const a = createHash("sha256").update(value).digest();
-  const b = createHash("sha256").update(expected).digest();
-  return timingSafeEqual(a, b);
-}
-
-export function createAdminToken() {
-  const payload = `admin:${Math.floor(Date.now() / 1000) + SESSION_SECONDS}`;
-  return `${Buffer.from(payload).toString("base64url")}.${sign(payload)}`;
-}
-
-function verifyToken(token?: string) {
-  if (!token) return false;
-  const [encoded, signature] = token.split(".");
-  if (!encoded || !signature) return false;
-  try {
-    const payload = Buffer.from(encoded, "base64url").toString("utf8");
-    const [role, expires] = payload.split(":");
-    const expected = sign(payload);
-    if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return false;
-    return role === "admin" && Number(expires) > Math.floor(Date.now() / 1000);
-  } catch {
-    return false;
-  }
+export function isAdminEmail(email: string) {
+  return ADMIN_EMAILS.has(email.trim().toLowerCase());
 }
 
 export async function getAdminUser() {
-  const store = await cookies();
-  if (!verifyToken(store.get(ADMIN_COOKIE)?.value)) return null;
-  return {
-    displayName: process.env.ADMIN_NAME || "Администратор",
-    email: process.env.ADMIN_EMAIL || "admin@dinastiya.local",
-  };
+  if(!process.env.NEXT_PUBLIC_SUPABASE_URL||!process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)return null;
+  const supabase=await createClient(),{data:{user}}=await supabase.auth.getUser();
+  const email=user?.email?.trim().toLowerCase();
+  if(!user||!email||!isAdminEmail(email))return null;
+  return {email,displayName:String(user.user_metadata?.full_name??email),fullName:String(user.user_metadata?.full_name??"")||null};
 }
-
-export const adminCookieOptions = {
-  httpOnly: true,
-  sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
-  path: "/",
-  maxAge: SESSION_SECONDS,
-};

@@ -1,51 +1,17 @@
 import { getAdminUser } from "../../admin-auth";
-import { getDb, leadFromRow } from "../../../db";
+import { createAdminClient } from "../../../lib/supabase/admin";
 
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
+async function fingerprint(request:Request){const source=`${request.headers.get("x-forwarded-for")??"unknown"}:${request.headers.get("user-agent")??"unknown"}`;const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(source));return Array.from(new Uint8Array(digest)).map(value=>value.toString(16).padStart(2,"0")).join("")}
+const mapLead=(row:Record<string,unknown>)=>({id:Number(row.id),name:String(row.name),phone:String(row.phone),city:String(row.city),propertyType:String(row.property_type),note:String(row.note??""),status:String(row.status),createdAt:String(row.created_at)});
 
-export async function POST(request: Request) {
-  try {
-    const data = await request.json() as Record<string, unknown>;
-    const name = String(data.name ?? "").trim();
-    const phone = String(data.phone ?? "").trim();
-    if (name.length < 2 || phone.length < 6) return Response.json({ error: "Проверьте имя и телефон" }, { status: 400 });
-    const db = await getDb();
-    const result = await db.query(
-      "INSERT INTO seller_leads (name,phone,city,property_type,note) VALUES ($1,$2,$3,$4,$5) RETURNING *",
-      [name, phone, String(data.city ?? "Тирасполь"), String(data.propertyType ?? "Квартира"), String(data.note ?? "").slice(0, 1000)],
-    );
-    return Response.json({ lead: leadFromRow(result.rows[0]) }, { status: 201 });
-  } catch (error) {
-    console.error("leads POST", error);
-    return Response.json({ error: "Не удалось сохранить заявку" }, { status: 500 });
-  }
+export async function POST(request:Request){
+  try{const data=await request.json() as Record<string,unknown>;if(String(data.website??"").trim())return Response.json({ok:true},{status:201});const name=String(data.name??"").trim(),phone=String(data.phone??"").trim(),digits=phone.replace(/\D/g,"");if(name.length<2||name.length>100||digits.length<7||digits.length>15)return Response.json({error:"Проверьте имя и телефон"},{status:400});
+    const client=createAdminClient(),now=new Date(),createdAt=now.toISOString(),key=await fingerprint(request),cutoff=new Date(now.getTime()-10*60_000).toISOString();const {count,error:countError}=await client.from("submission_attempts").select("id",{count:"exact",head:true}).eq("fingerprint",key).gte("created_at",cutoff);if(countError)throw countError;if((count??0)>=3)return Response.json({error:"Слишком много попыток. Попробуйте позже или позвоните нам."},{status:429,headers:{"retry-after":"600"}});
+    const attempt=await client.from("submission_attempts").insert({fingerprint:key,created_at:createdAt});if(attempt.error)throw attempt.error;await client.from("submission_attempts").delete().lt("created_at",new Date(now.getTime()-2*864e5).toISOString());
+    const {data:lead,error}=await client.from("seller_leads").insert({name,phone,city:String(data.city??"Тирасполь"),property_type:String(data.propertyType??"Квартира"),note:String(data.note??"").slice(0,1000)}).select().single();if(error)throw error;await client.from("analytics_events").insert({event:"seller_submit",path:"/",created_at:createdAt});return Response.json({lead:mapLead(lead)},{status:201});
+  }catch{return Response.json({error:"Не удалось сохранить заявку"},{status:500})}
 }
 
-export async function GET() {
-  if (!(await getAdminUser())) return Response.json({ error: "Нет доступа" }, { status: 403 });
-  try {
-    const db = await getDb();
-    const result = await db.query("SELECT * FROM seller_leads ORDER BY id DESC LIMIT 100");
-    return Response.json({ leads: result.rows.map(leadFromRow) });
-  } catch (error) {
-    console.error("leads GET", error);
-    return Response.json({ error: "Заявки временно недоступны", leads: [] }, { status: 503 });
-  }
-}
+export async function GET(){if(!(await getAdminUser()))return Response.json({error:"Нет доступа"},{status:403});try{const {data,error}=await createAdminClient().from("seller_leads").select("*").order("id",{ascending:false}).limit(100);if(error)throw error;return Response.json({leads:(data??[]).map(row=>mapLead(row))})}catch{return Response.json({leads:[]},{status:503})}}
 
-export async function PATCH(request: Request) {
-  if (!(await getAdminUser())) return Response.json({ error: "Нет доступа" }, { status: 403 });
-  try {
-    const data = await request.json() as Record<string, unknown>;
-    const id = Number(data.id);
-    const status = String(data.status ?? "");
-    if (!id || !["Новая", "В работе", "Завершена"].includes(status)) return Response.json({ error: "Некорректный статус" }, { status: 400 });
-    const db = await getDb();
-    const result = await db.query("UPDATE seller_leads SET status=$1 WHERE id=$2 RETURNING *", [status, id]);
-    return Response.json({ lead: result.rows[0] ? leadFromRow(result.rows[0]) : null });
-  } catch (error) {
-    console.error("leads PATCH", error);
-    return Response.json({ error: "Не удалось обновить заявку" }, { status: 500 });
-  }
-}
+export async function PATCH(request:Request){if(!(await getAdminUser()))return Response.json({error:"Нет доступа"},{status:403});try{const data=await request.json() as Record<string,unknown>,id=Number(data.id),status=String(data.status??"");if(!id||!["Новая","В работе","Завершена"].includes(status))return Response.json({error:"Некорректный статус"},{status:400});const {data:lead,error}=await createAdminClient().from("seller_leads").update({status}).eq("id",id).select().single();if(error)throw error;return Response.json({lead:mapLead(lead)})}catch{return Response.json({error:"Не удалось обновить заявку"},{status:500})}}

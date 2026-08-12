@@ -1,22 +1,11 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getAdminUser } from "../../admin-auth";
+import LoginForm from "./LoginForm";
 
-export const dynamic = "force-dynamic";
+export const metadata={title:"Вход в админ-панель — Династия",robots:{index:false,follow:false}};
 
-export default async function AdminLogin({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
-  if (await getAdminUser()) redirect("/admin");
-  const { error } = await searchParams;
-  return <main className="admin-login-shell">
-    <form action="/api/admin/login" method="post" className="admin-login-card">
-      <Link href="/" className="admin-login-back">← Вернуться на сайт</Link>
-      <span className="brand-seal">Д</span>
-      <small>ДИНАСТИЯ · УПРАВЛЕНИЕ</small>
-      <h1>Вход администратора</h1>
-      <p>Доступ только для владельца и сотрудников агентства.</p>
-      <label>Пароль<input name="password" type="password" autoComplete="current-password" required autoFocus /></label>
-      <button type="submit">Войти</button>
-      {error && <strong role="alert">Неверный пароль. Попробуйте ещё раз.</strong>}
-    </form>
-  </main>;
+export default async function LoginPage(){
+  if(await getAdminUser())redirect("/admin");
+  return <main className="admin-login"><section><Link href="/">← На сайт</Link><small>Агентство недвижимости «Династия»</small><h1>Вход для сотрудников</h1><p>Используйте учётную запись, созданную администратором агентства.</p><LoginForm/></section></main>;
 }
