@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
+import { supabasePublishableKey, supabaseUrl } from "./config";
 
 export function createAdminClient(){
-  const url=process.env.NEXT_PUBLIC_SUPABASE_URL,key=process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if(!url||!key)throw new Error("Supabase не настроен");
-  return createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
+  const key=process.env.SUPABASE_SERVICE_ROLE_KEY || supabasePublishableKey;
+  return createClient(supabaseUrl,key,{auth:{persistSession:false,autoRefreshToken:false}});
 }
